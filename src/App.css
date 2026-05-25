@@ -21,8 +21,18 @@ h1 {
 }
 
 @media (max-width: 800px) {
+  .app {
+    padding: 16px;
+  }
+
   .layout {
     grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  /* Preview is hidden on small screens — keep the controls focused. */
+  .preview-panel {
+    display: none;
   }
 }
 
@@ -64,11 +74,14 @@ input[type="text"],
 textarea,
 select {
   font: inherit;
+  /* 16px prevents iOS Safari from zooming the viewport on focus. */
+  font-size: 16px;
   padding: 8px 10px;
   border-radius: 6px;
   border: 1px solid rgba(0, 0, 0, 0.15);
   background: white;
   color: inherit;
+  width: 100%;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -79,6 +92,11 @@ select {
     background: #2a2a2a;
     border-color: rgba(255, 255, 255, 0.15);
   }
+}
+
+input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 textarea {

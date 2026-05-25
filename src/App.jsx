@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { jsPDF } from 'jspdf'
 import './App.css'
 
@@ -33,28 +33,57 @@ function fitFontSizePx(text, maxWidthPx, maxHeightPx, family, weight) {
   return size
 }
 
-const FONT_MAP = {
-  Helvetica: { pdf: 'helvetica', css: 'Helvetica, Arial, sans-serif' },
-  Times: { pdf: 'times', css: '"Times New Roman", Times, serif' },
-  Courier: { pdf: 'courier', css: '"Courier New", Courier, monospace' },
+const FONT_CSS = 'Helvetica, Arial, sans-serif'
+
+const MIN_LABEL_IN = 0.5
+
+// Pick the (cols, rows) grid that fits all N labels on a single page.
+// Text reads horizontally, so we maximize cell width first, then cell height
+// as a tiebreaker. On a landscape page this favors wide stacked cells over
+// tall side-by-side ones.
+function autoFitLabelSize(n, pageW, pageH, margin, gap) {
+  if (n <= 0) return null
+  const availW = pageW - 2 * margin + gap
+  const availH = pageH - 2 * margin + gap
+  if (availW <= 0 || availH <= 0) return null
+  let best = null
+  for (let c = 1; c <= n; c++) {
+    const w = availW / c - gap
+    if (w < MIN_LABEL_IN) break
+    // For a given c, the smallest r that holds all n labels gives the tallest
+    // cell. Any larger r would only shrink h without changing w.
+    const r = Math.ceil(n / c)
+    const h = availH / r - gap
+    if (h < MIN_LABEL_IN) continue
+    if (!best || w > best.w || (w === best.w && h > best.h)) best = { w, h }
+  }
+  return best
 }
 
 export default function App() {
-  const [labelWidth, setLabelWidth] = useState(4)
-  const [labelHeight, setLabelHeight] = useState(2)
+  const [manualWidth, setManualWidth] = useState(4)
+  const [manualHeight, setManualHeight] = useState(2)
   const [margin, setMargin] = useState(0.25)
   const [gap, setGap] = useState(0.1)
   const [padding, setPadding] = useState(0.1)
   const [drawBorders, setDrawBorders] = useState(true)
-  const [fontKey, setFontKey] = useState('Helvetica')
+  const [autoFit, setAutoFit] = useState(false)
   const [fontWeight, setFontWeight] = useState('bold')
   const [text, setText] = useState('Hello World\nKitchen\nBathroom Cabinet\nGuest Room — Linens\nGarage Shelf A')
   const [previewPage, setPreviewPage] = useState(0)
 
   const labels = useMemo(
-    () => text.split('\n').map((s) => s.trim()).filter(Boolean),
+    () => text.split('\n').map((s) => s.trim().toUpperCase()).filter(Boolean),
     [text]
   )
+
+  const autoFitted = useMemo(
+    () => (autoFit ? autoFitLabelSize(labels.length, PAGE_W_IN, PAGE_H_IN, margin, gap) : null),
+    [autoFit, labels.length, margin, gap]
+  )
+
+  const labelWidth = autoFitted ? autoFitted.w : manualWidth
+  const labelHeight = autoFitted ? autoFitted.h : manualHeight
 
   const layout = useMemo(() => {
     const cellW = labelWidth + gap
@@ -72,20 +101,20 @@ export default function App() {
     if (previewPage >= layout.pages) setPreviewPage(Math.max(0, layout.pages - 1))
   }, [layout.pages, previewPage])
 
-  const tooSmall = layout.perPage > 0 && layout.perPage < 2
+  const tooSmall = layout.perPage === 1 && labels.length > 1
   const noFit = layout.perPage === 0
+  const autoFitFailed = autoFit && labels.length > 0 && !autoFitted
 
-  function generatePdf() {
+  function previewPdf() {
     const doc = new jsPDF({ unit: 'in', format: 'letter', orientation: 'landscape' })
-    doc.setFont(FONT_MAP[fontKey].pdf, fontWeight)
+    doc.setFont('helvetica', fontWeight)
 
-    const { cols, rows, perPage } = layout
+    const { cols, perPage } = layout
     if (perPage === 0 || labels.length === 0) return
 
     labels.forEach((label, i) => {
-      const pageIdx = Math.floor(i / perPage)
       const slot = i % perPage
-      if (slot === 0 && pageIdx > 0) doc.addPage()
+      if (i > 0 && slot === 0) doc.addPage()
       const col = slot % cols
       const row = Math.floor(slot / cols)
       const x = margin + col * (labelWidth + gap)
@@ -108,7 +137,7 @@ export default function App() {
       })
     })
 
-    doc.save('labels.pdf')
+    window.open(doc.output('bloburl'), '_blank')
   }
 
   const pageLabels = useMemo(() => {
@@ -131,8 +160,9 @@ export default function App() {
                 type="number"
                 step="0.05"
                 min="0.5"
-                value={labelWidth}
-                onChange={(e) => setLabelWidth(parseFloat(e.target.value) || 0)}
+                value={autoFit ? labelWidth.toFixed(2) : manualWidth}
+                disabled={autoFit}
+                onChange={(e) => setManualWidth(parseFloat(e.target.value) || 0)}
               />
             </div>
             <div className="field">
@@ -141,10 +171,22 @@ export default function App() {
                 type="number"
                 step="0.05"
                 min="0.5"
-                value={labelHeight}
-                onChange={(e) => setLabelHeight(parseFloat(e.target.value) || 0)}
+                value={autoFit ? labelHeight.toFixed(2) : manualHeight}
+                disabled={autoFit}
+                onChange={(e) => setManualHeight(parseFloat(e.target.value) || 0)}
               />
             </div>
+          </div>
+
+          <div className="field">
+            <label>
+              <input
+                type="checkbox"
+                checked={autoFit}
+                onChange={(e) => setAutoFit(e.target.checked)}
+              />{' '}
+              Auto-fit labels to one page
+            </label>
           </div>
 
           <div className="row">
@@ -182,33 +224,23 @@ export default function App() {
               />
             </div>
             <div className="field">
-              <label>Font</label>
-              <select value={fontKey} onChange={(e) => setFontKey(e.target.value)}>
-                {Object.keys(FONT_MAP).map((k) => (
-                  <option key={k} value={k}>{k}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="row">
-            <div className="field">
               <label>Weight</label>
               <select value={fontWeight} onChange={(e) => setFontWeight(e.target.value)}>
                 <option value="normal">Normal</option>
                 <option value="bold">Bold</option>
               </select>
             </div>
-            <div className="field" style={{ justifyContent: 'flex-end' }}>
-              <label style={{ marginTop: 20 }}>
-                <input
-                  type="checkbox"
-                  checked={drawBorders}
-                  onChange={(e) => setDrawBorders(e.target.checked)}
-                />{' '}
-                Draw cut borders
-              </label>
-            </div>
+          </div>
+
+          <div className="field">
+            <label>
+              <input
+                type="checkbox"
+                checked={drawBorders}
+                onChange={(e) => setDrawBorders(e.target.checked)}
+              />{' '}
+              Draw cut borders
+            </label>
           </div>
 
           <div className="field">
@@ -217,7 +249,11 @@ export default function App() {
           </div>
 
           <div className="summary">
-            {noFit ? (
+            {autoFitFailed ? (
+              <strong style={{ color: 'crimson' }}>
+                Too many labels to fit on a single page at the current margins/gap.
+              </strong>
+            ) : noFit ? (
               <strong style={{ color: 'crimson' }}>
                 Labels are too large to fit on the page. Reduce size or margins.
               </strong>
@@ -236,12 +272,15 @@ export default function App() {
             )}
           </div>
 
-          <button onClick={generatePdf} disabled={noFit || labels.length === 0}>
-            Download PDF
+          <button
+            onClick={previewPdf}
+            disabled={noFit || autoFitFailed || labels.length === 0}
+          >
+            Preview PDF
           </button>
         </div>
 
-        <div className="panel">
+        <div className="panel preview-panel">
           <div className="preview-wrap">
             <PagePreview
               cols={layout.cols}
@@ -252,7 +291,6 @@ export default function App() {
               gap={gap}
               padding={padding}
               drawBorders={drawBorders}
-              fontKey={fontKey}
               fontWeight={fontWeight}
               pageLabels={pageLabels}
             />
@@ -291,7 +329,6 @@ function PagePreview({
   gap,
   padding,
   drawBorders,
-  fontKey,
   fontWeight,
   pageLabels,
 }) {
@@ -301,7 +338,7 @@ function PagePreview({
   const labelHpx = labelH * PREVIEW_DPI
   const innerWpx = (labelW - 2 * padding) * PREVIEW_DPI
   const innerHpx = (labelH - 2 * padding) * PREVIEW_DPI
-  const cssFamily = FONT_MAP[fontKey].css
+  const cssFamily = FONT_CSS
 
   const slots = []
   for (let row = 0; row < rows; row++) {
