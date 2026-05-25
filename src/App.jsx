@@ -148,7 +148,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <h1>Printify</h1>
+      <h1>Overlabeled</h1>
       <p className="subtitle">Generate a printable label sheet (US Letter, landscape).</p>
 
       <div className="layout">
