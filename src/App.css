@@ -12,6 +12,15 @@ h1 {
 .subtitle {
   margin: 0 0 24px;
   opacity: 0.7;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.subtitle-gif {
+  height: 4em;
+  width: auto;
+  border-radius: 4px;
 }
 
 .layout {
@@ -61,6 +70,35 @@ h1 {
   font-weight: 500;
   margin-bottom: 4px;
   opacity: 0.8;
+}
+
+.field-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.field-header label {
+  margin-bottom: 4px;
+}
+
+.link-button {
+  background: none;
+  color: #0066ff;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.link-button:hover {
+  background: none;
+  text-decoration: underline;
+}
+
+.link-button:disabled {
+  background: none;
+  color: #999;
+  text-decoration: none;
 }
 
 .row {
