@@ -5,34 +5,79 @@ import "./App.css";
 const PAGE_W_IN = 11; // Letter landscape
 const PAGE_H_IN = 8.5;
 const PREVIEW_DPI = 64; // px per inch in the on-screen preview
+const LINE_HEIGHT_FACTOR = 1.15;
+
+// Text wrapping: pack words onto a line until the next word would
+// overflow maxWidth, then start a new line.
+function wrapToLines(measureWidth, words, maxWidth) {
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (current && measureWidth(candidate) > maxWidth) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+// Finds the largest font size that lets the text fit
+// within maxWidth/maxHeight, wrapping onto extra lines when that yields a
+// bigger font than forcing everything onto one line.
+function fitTextBlock(measureWidth, text, maxWidthUnits, maxHeightUnits, unitsPerSize) {
+  const words = text.split(" ").filter(Boolean);
+  // Cap by height: cap-height of most fonts is ~0.7 of em, so 0.85*height
+  // leaves a small visual margin.
+  let size = Math.max(4, Math.floor((maxHeightUnits / unitsPerSize) * 0.85));
+  while (size > 4) {
+    const lines = wrapToLines((s) => measureWidth(s, size), words, maxWidthUnits);
+    const lineHeight = size * unitsPerSize * LINE_HEIGHT_FACTOR;
+    const totalHeight = lines.length * lineHeight;
+    const maxLineWidth = Math.max(...lines.map((l) => measureWidth(l, size)));
+    if (totalHeight <= maxHeightUnits && maxLineWidth <= maxWidthUnits) {
+      return { size, lines };
+    }
+    size -= 1;
+  }
+  const lines = wrapToLines((s) => measureWidth(s, size), words, maxWidthUnits);
+  return { size, lines };
+}
 
 // jsPDF uses points (1pt = 1/72in) internally for font sizing.
 // We use unit: 'in' so getTextWidth returns inches.
 function fitFontSizePdf(doc, text, maxWidthIn, maxHeightIn) {
-  // Cap by height: cap-height of most fonts is ~0.7 of em, so 0.85*height
-  // leaves a small visual margin.
-  let size = Math.max(4, Math.floor(maxHeightIn * 72 * 0.85));
-  doc.setFontSize(size);
-  while (size > 4 && doc.getTextWidth(text) > maxWidthIn) {
-    size -= 1;
-    doc.setFontSize(size);
-  }
-  return size;
+  return fitTextBlock(
+    (s, size) => {
+      doc.setFontSize(size);
+      return doc.getTextWidth(s);
+    },
+    text,
+    maxWidthIn,
+    maxHeightIn,
+    1 / 72,
+  );
 }
 
 // Mirror the PDF sizing logic on-screen using a measurement canvas.
 function fitFontSizePx(text, maxWidthPx, maxHeightPx, family, weight) {
-  if (!text) return 0;
+  if (!text) return { size: 0, lines: [] };
   const ctx =
     fitFontSizePx.ctx ||
     (fitFontSizePx.ctx = document.createElement("canvas").getContext("2d"));
-  let size = Math.max(4, Math.floor(maxHeightPx * 0.85));
-  while (size > 4) {
-    ctx.font = `${weight} ${size}px ${family}`;
-    if (ctx.measureText(text).width <= maxWidthPx) return size;
-    size -= 1;
-  }
-  return size;
+  return fitTextBlock(
+    (s, size) => {
+      ctx.font = `${weight} ${size}px ${family}`;
+      return ctx.measureText(s).width;
+    },
+    text,
+    maxWidthPx,
+    maxHeightPx,
+    1,
+  );
 }
 
 const FONT_CSS = "Helvetica, Arial, sans-serif";
@@ -144,12 +189,19 @@ export default function App() {
 
       const innerW = labelWidth - 2 * padding;
       const innerH = labelHeight - 2 * padding;
-      const size = fitFontSizePdf(doc, label, innerW, innerH);
+      const { size, lines } = fitFontSizePdf(doc, label, innerW, innerH);
       doc.setFontSize(size);
       doc.setTextColor(0, 0, 0);
-      doc.text(label, x + labelWidth / 2, y + labelHeight / 2, {
-        align: "center",
-        baseline: "middle",
+
+      const lineHeightIn = (size / 72) * LINE_HEIGHT_FACTOR;
+      const blockHeightIn = lines.length * lineHeightIn;
+      const centerX = x + labelWidth / 2;
+      const firstLineY = y + labelHeight / 2 - blockHeightIn / 2 + lineHeightIn / 2;
+      lines.forEach((line, li) => {
+        doc.text(line, centerX, firstLineY + li * lineHeightIn, {
+          align: "center",
+          baseline: "middle",
+        });
       });
     });
 
@@ -400,7 +452,7 @@ function PagePreview({
         const text = pageLabels[i] || "";
         const left = (margin + col * (labelW + gap)) * PREVIEW_DPI;
         const top = (margin + row * (labelH + gap)) * PREVIEW_DPI;
-        const size = fitFontSizePx(
+        const { size, lines } = fitFontSizePx(
           text,
           innerWpx,
           innerHpx,
@@ -420,9 +472,12 @@ function PagePreview({
               fontFamily: cssFamily,
               fontWeight,
               fontSize: size ? `${size}px` : 0,
+              lineHeight: LINE_HEIGHT_FACTOR,
             }}
           >
-            {text}
+            {lines.map((line, li) => (
+              <div key={li}>{line}</div>
+            ))}
           </div>
         );
       })}
